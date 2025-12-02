@@ -223,7 +223,7 @@ class AgentNode(UDPNode):
         start_time = time.time()
         time.sleep(self.inference_time_ms / 1000.0)  # Simulate inference
         
-        # Generate result based on specialty
+        # Generate result based on specialty (STATIC RESPONSE FOR TESTING)
         if self.specialty == "code-generation":
             result = "def find_smallest(lst):\n    return min(lst)"
         elif self.specialty == "text-generation":

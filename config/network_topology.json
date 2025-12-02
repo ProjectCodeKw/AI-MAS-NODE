@@ -4,25 +4,15 @@
   "public_key_algorithm": "RSA",
   "nodes": [
     {
-  "network_address": "192.168.56.101:8001",
+  "network_address": "192.168.1.62:8001",
   "port": 8001,
-  "public_key": "MIGeMA0GCSqGSIb3DQEBAQUAA4GMADCBiAKBgGcEcwlUwfg1tI6t/4vnqi4tns6c7rE5WF2MnqdVwokrAXOUGnaD2gywAIZbIOdkAh6Bj61KVvttSXEhVTVn/TVdmPnXb5k7N5bTdxSJMYqPImStgVK7UVC7Chx2f95CgNLHgs29toT4iaP+5AItabh+O0/IwuJ96GWZQeh5RoZTAgMBAAE="
+  "public_key": "MCowBQYDK2VwAyEAScPp0M5n9tBx0qK1FVlUDIHEUIBldKtlEDDa4LFPDeE="
   },
-    {
-      "network_address": "192.168.56.102:8001",
+  {
+      "network_address": "192.168.1.65:8001",
       "port": 8001,
-  "public_key": "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC4+RDy3s3T/ZbYYUpDFGPPxCMsAHMQ5Mgb+/0/oFrcVN0Vjs3+yQrdqSmmffjeEH3AfiQn5oroYQsi+wCfoTHawfg3gpsBzrgrgFViXDLBviCQdWtvTqu8qlkHOcrUNIQDG069OeoyG82IHvM3njS/UkIy6qYIwM4fbgzULfPmtQIDAQAB"
-},
-    {
-      "network_address": "192.168.56.104:8001",
-      "port": 8001,
-      "public_key": "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCKaafLWPA7EOSTB11bArS6aTp/j1cepNrTxBCINkj1GTz7xr0an98BJMGl4E1csSjGLsGUVi4W7P1k6ajpRiFX6pJfCdGckLdEJUvwjnp5JJk/MenCeHyLPGOPEBGkfeYqYrKMZiJUZfN8AreGOoLHX1h+kxHxhkHAWpRZJtR2vwIDAQAB"
-    },
-    {
-      "network_address": "192.168.56.105:8001",
-      "port": 8001,
-      "public_key": "MIGeMA0GCSqGSIb3DQEBAQUAA4GMADCBiAKBgHnNH41dw/NDo3cajEoLskkyZggBfaIke9qkq8iN6ZKypGjuQRKOGhgP2LTKrQWVN7u9QtMdzDibYhS48fK5FdH4ddvbEnoUQhRopPJW6DAXHoPiBSuOcHvuWSgA0RhqRA/JiM/1E6NClk/7VxLcHPQEzx6jt0+P62h2+d9sE5YdAgMBAAE="
-    }
+      "public_key": "MCowBQYDK2VwAyEA27y2TUOVascRv1sQmKffCILP5F/a4+zClnjxtfxgH9k="
+}
   ],
   "gossip_config": {
     "fanout": 2,
