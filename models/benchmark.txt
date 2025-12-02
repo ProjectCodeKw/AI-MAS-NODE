@@ -1,0 +1,39 @@
+curl -X POST "http://localhost:8000/code" \
+  -H "Content-Type: application/json" \
+  -d '{"task":"write a function that sums a list","language":"python"}'
+
+uvicorn app:app --host 0.0.0.0 --port 8000
+
+============================================================
+  PHASE 4: MEMORY ANALYSIS
+============================================================
+Memory Usage After Tests:
+  RAM Available: 1.19 GB
+  RAM Used: 38.3%
+  Swap Used: 35.7%
+  Memory Delta: -0.07 GB
+
+============================================================
+  BENCHMARK SUMMARY
+============================================================
+PERFORMANCE SUMMARY:
+----------------------------------------
+Model Load Time: 0.107 seconds
+
+Prompt Generation:
+  Average Time: 23.821s
+  Best Time: 17.157s
+  Worst Time: 33.211s
+
+Token Generation Speed:
+  Average: 6.3 tokens/sec
+  Best: 6.4 tokens/sec
+  Worst: 6.2 tokens/sec
+
+Memory Usage:
+  Start: 1.11 GB available
+  End: 1.19 GB available
+
+============================================================
+BENCHMARK COMPLETE
+Overall Rating: FAIR (6.3 tokens/sec)

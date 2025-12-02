@@ -1,0 +1,28 @@
+{
+  "network": {
+    "host": "192.168.56.106",
+    "port": 8001,
+    "bind_interface": "enp0s3"
+  },
+  "tor": {
+    "enabled": true,
+    "circuit_timeout_ms": 5000
+  },
+  "gossip": {
+    "enabled": true,
+    "fanout": 2,
+    "update_interval_seconds": 300
+  },
+  "inference": {
+    "enabled": false,
+    "model_path": "/home/ai-mas/models/",
+    "model_name": "qwen2-1_5b-instruct-q4_0.gguf",
+    "context_length": 2048,
+    "threads": 2,
+    "expected_inference_ms": 300
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "/home/ai-mas/logs/node.log"
+  }
+}
