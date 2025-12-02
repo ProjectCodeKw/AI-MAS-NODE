@@ -31,7 +31,6 @@ if __name__ == "__main__":
     print(f"{'='*60}")
     print(f"Address: {MY_IP}:{MY_PORT}")
     print(f"{'='*60}\n")
-    print("Copy the public key above and add it to network_topology.json")
     print("Press Ctrl+C to stop\n")
 
     try:
