@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 """Agent-Code Startup Script"""
-#chmod 600 /home/ai-mas/ai-mas-node/keys/agent-code-private.pem
+
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from agent_node import AgentNode
+from src.nodes.agent_node import AgentNode
 from src.crypto.crypto_utils import CryptoUtils
 import time
 
-# CHANGE THIS TO YOUR ACTUAL IP
-MY_IP = "192.168.1.88"  # <-- PUT YOUR IP HERE
+MY_IP = "192.168.1.88"  
 MY_PORT = 8001
 
 if __name__ == "__main__":
     print("Starting Agent-Code...")
     
     agent = AgentNode(
-        node_id="Agent-Code",
+        node_id="agent-code",
         host="0.0.0.0",
         port=MY_PORT,
         specialty="code-generation",
@@ -26,17 +25,19 @@ if __name__ == "__main__":
     
     agent.start()
     
+    pubkey = CryptoUtils.serialize_public_key(agent.public_key)
     print(f"\n{'='*60}")
     print(f"Agent-Code Started!")
     print(f"{'='*60}")
     print(f"Address: {MY_IP}:{MY_PORT}")
+    print(f"Specialty: code-generation")
+    print(f"Public Key: {pubkey}")
     print(f"{'='*60}\n")
-    print("Press Ctrl+C to stop\n")
-
+    
     try:
         while True:
             time.sleep(60)
             agent.print_stats()
     except KeyboardInterrupt:
-        print("\nStopping...")
+        print("\nStopping Agent-Code...")
         agent.stop()

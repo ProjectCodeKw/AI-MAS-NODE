@@ -7,7 +7,7 @@
   "network_address": "192.168.56.101:8001",
   "port": 8001,
   "public_key": "MIGeMA0GCSqGSIb3DQEBAQUAA4GMADCBiAKBgGcEcwlUwfg1tI6t/4vnqi4tns6c7rE5WF2MnqdVwokrAXOUGnaD2gywAIZbIOdkAh6Bj61KVvttSXEhVTVn/TVdmPnXb5k7N5bTdxSJMYqPImStgVK7UVC7Chx2f95CgNLHgs29toT4iaP+5AItabh+O0/IwuJ96GWZQeh5RoZTAgMBAAE="
-},
+  },
     {
       "network_address": "192.168.56.102:8001",
       "port": 8001,
