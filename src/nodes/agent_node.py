@@ -213,185 +213,83 @@ class AgentNode(UDPNode):
     
     def _handle_tor_packet(self, packet: dict, addr: tuple):
         """
-        Handle Tor circuit packet
+        Handle Tor circuit packet (generic structure - no layer names)
         Two cases:
-        1. Final destination (Layer 1 decrypts) → Process task_json
-        2. Intermediate relay (Layer 1 fails) → Forward to next_hop
+        1. Final destination (decrypt succeeds) → Process task_json
+        2. Intermediate relay (decrypt fails) → Forward to next_hop
         """
+        from cryptography.hazmat.primitives import serialization
+
         print(f"\n{'='*80}")
         print(f"[{self.node_id}] RECEIVED TOR PACKET")
         print(f"{'='*80}")
         print(f"From: {addr[0]}:{addr[1]}")
         print(f"To: {self.host}:{self.port}")
-        print(f"Packet type: {packet.get('type', 'UNKNOWN')}")
 
         # Case 1: Packet already contains plaintext task_json (simplified for testing)
-        if 'task_json' in packet:
-            print(f"\nPacket contains: Plaintext task_json")
-            print(f"Task JSON entries: {len(packet['task_json'])}")
-            print(f"Status: Final destination (no encryption)")
+        if 'task_json' in packet and 'encrypted' not in packet:
+            print(f"Status: Plaintext task_json (no encryption)")
             print(f"{'='*80}\n")
-            self.logger.info("Received plaintext task_json - processing")
             self._process_task_json(packet['task_json'])
             return
 
-        # If this packet contains an outer encrypted layer (layer4/layer3/layer2),
-        # attempt to decrypt using known relay keys, print the decrypted payload,
-        # and forward the peeled payload to its `next_hop`/`dest`.
-        for outer_layer in ('layer4', 'layer3', 'layer2'):
-            if outer_layer in packet:
-                layer_data = packet[outer_layer]
-                decrypted_payload = None
+        # Case 2: Encrypted packet - try to decrypt with our key
+        if 'encrypted' not in packet:
+            self.logger.warning(f"Unknown packet structure: {list(packet.keys())}")
+            return
 
-                # Derive symmetric key from this node's public key (TEST-ONLY)
-                # Must match sender's derivation: DER encoding truncated/padded to 32 bytes
-                from cryptography.hazmat.primitives import serialization
+        encrypted_data = packet['encrypted']
 
-                try:
-                    # Serialize to DER format (not PEM) to match topology encoding
-                    pub_bytes = self.public_key.public_bytes(
-                        encoding=serialization.Encoding.DER,
-                        format=serialization.PublicFormat.SubjectPublicKeyInfo
-                    )
-                    # Truncate/pad to 32 bytes (same as sender does)
-                    if len(pub_bytes) < 32:
-                        self_key = pub_bytes.ljust(32, b"\0")
-                    elif len(pub_bytes) > 32:
-                        self_key = pub_bytes[:32]
-                    else:
-                        self_key = pub_bytes
-                except Exception as e:
-                    self.logger.error(f"Failed to derive key from public key: {e}")
-                    break
+        # Derive our key from public key (DER format, truncated to 32 bytes)
+        try:
+            pub_bytes = self.public_key.public_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            self_key = pub_bytes[:32] if len(pub_bytes) >= 32 else pub_bytes.ljust(32, b"\0")
+        except Exception as e:
+            self.logger.error(f"Failed to derive key: {e}")
+            return
 
-                try:
-                    decrypted_json = CryptoUtils.decrypt_aes_gcm(
-                        self_key,
-                        layer_data['nonce'],
-                        layer_data['ciphertext']
-                    )
-                    decrypted_payload = json.loads(decrypted_json)
-                except Exception as e:
-                    self.logger.debug(f"Failed to decrypt {outer_layer} with this node's key: {e}")
-                    # If decryption fails with the node's key, do not try other keys (security model)
-                    break
+        # Try to decrypt
+        try:
+            decrypted_json = CryptoUtils.decrypt_aes_gcm(
+                self_key, encrypted_data['nonce'], encrypted_data['ciphertext']
+            )
+            decrypted = json.loads(decrypted_json)
+            print(f"Status: Decrypted successfully")
 
-                if decrypted_payload is None:
-                    # Could not decrypt with available keys
-                    self.logger.debug(f"Received {outer_layer} but could not decrypt with available keys")
-                    # Do not treat as final; fallback to existing relay behavior
-                    break
-
-                # Print decrypted payload for inspection
-                print(f"\nDecrypted {outer_layer} payload:")
-                try:
-                    print(json.dumps(decrypted_payload, indent=2))
-                except Exception:
-                    print(str(decrypted_payload))
-
-                # Forward the peeled payload to its next hop (if present)
-                next_hop = decrypted_payload.get('next_hop') or decrypted_payload.get('dest')
+            # Check if this has another encrypted layer (relay) or is final payload
+            if 'encrypted' in decrypted:
+                # Still has more layers - forward to next hop
+                next_hop = decrypted.get('next_hop')
                 if next_hop:
-                    try:
-                        host, port = next_hop.split(':')
-                        port = int(port)
-                        forward_packet = {'type': 'TOR_PACKET', **decrypted_payload}
-                        self.send_message(forward_packet, host, port)
-                        self.logger.info(f"Forwarded peeled {outer_layer} to {next_hop}")
-                    except Exception as e:
-                        self.logger.error(f"Failed forwarding peeled {outer_layer}: {e}")
-                else:
-                    self.logger.warning(f"Decrypted {outer_layer} has no next_hop/dest; not forwarding")
-
-                # Stop processing after handling the outer layer
+                    host, port = next_hop.split(':')
+                    forward_packet = {'type': 'TOR_PACKET', **decrypted}
+                    self.send_message(forward_packet, host, int(port))
+                    print(f"Forwarded to: {next_hop}")
+                    print(f"{'='*80}\n")
+                    self.logger.info(f"Relayed packet to {next_hop}")
                 return
 
-        # Case 2: Full Tor packet with Layer 1 encryption
-        if 'layer1' in packet:
-            layer1_data = packet['layer1']
-            print(f"\nPacket contains: Encrypted Layer 1")
-            print(f"Layer 1 nonce: {layer1_data.get('nonce', 'N/A')[:16]}...")
-            print(f"Layer 1 ciphertext size: {len(layer1_data.get('ciphertext', ''))} bytes")
-            print(f"\nAttempting to decrypt with agent_id: {self.node_id}")
+            # Final destination - process the payload
+            print(f"Status: Final destination")
+            print(f"{'='*80}\n")
+            self._process_task_json(decrypted)
+            return
 
-            # Try to decrypt Layer 1 with our agent_id
-            try:
-                my_key = CryptoUtils.derive_key_from_agent_id(self.node_id)
-
-                decrypted = CryptoUtils.decrypt_aes_gcm(
-                    my_key,
-                    layer1_data['nonce'],
-                    layer1_data['ciphertext']
-                )
-
-                # SUCCESS - we can see plaintext!
-                print(f"\nDecryption SUCCESS!")
-                print(f"Status: Final destination")
-
-                # Parse decrypted content. Some builders wrap the actual payload
-                # under a 'plaintext' key (string). Unwrap if present.
-                parsed = None
-                try:
-                    parsed = json.loads(decrypted)
-                except Exception:
-                    # If it isn't valid JSON, treat decrypted as raw plaintext
-                    parsed = decrypted
-
-                # If wrapper present, try to extract inner plaintext
-                if isinstance(parsed, dict) and 'plaintext' in parsed:
-                    inner = parsed.get('plaintext')
-                    try:
-                        task_json = json.loads(inner)
-                    except Exception:
-                        task_json = inner
-                else:
-                    task_json = parsed
-
-                # Log and dispatch to task processor if it's the expected task JSON
-                try:
-                    if isinstance(task_json, dict):
-                        print(f"Decrypted task_json entries: {len(task_json)}")
-                    else:
-                        print("Decrypted payload (non-dict)")
-                except Exception:
-                    pass
-
+        except Exception as e:
+            # Decryption failed - we're an intermediate relay
+            next_hop = packet.get('next_hop')
+            if next_hop:
+                print(f"Status: Relay (cannot decrypt)")
+                print(f"Forwarding to: {next_hop}")
                 print(f"{'='*80}\n")
-                self.logger.info("Layer 1 decrypted - I'm the final destination")
-                self._process_task_json(task_json)
-                return
-
-            except Exception as e:
-                # FAILED - we're just a relay, forward it
-                print(f"\nDecryption FAILED: {str(e)[:50]}")
-                print(f"Status: Intermediate relay (not for me)")
-                next_hop = packet.get('next_hop') or packet.get('dest') or 'NOT SPECIFIED'
-                print(f"Next hop: {next_hop}")
-                print(f"{'='*80}\n")
-                self.logger.info("Cannot decrypt Layer 1 - acting as relay")
-                self._relay_tor_packet(packet)
-                return
-
-        print(f"\nUnknown Tor packet structure")
-        print(f"Available keys: {list(packet.keys())}")
-        print(f"{'='*80}\n")
-
-        # Also log the full packet structure (truncated) and pretty-print for debugging
-        try:
-            packet_str = json.dumps(packet, default=str)
-        except Exception:
-            packet_str = str(packet)
-
-        # Truncate to avoid excessively large log entries
-        truncated = packet_str[:2000]
-        self.logger.warning(f"Unknown Tor packet structure - keys={list(packet.keys())} - packet(truncated)={truncated}")
-
-        try:
-            import pprint
-            pprint.pprint(packet)
-        except Exception:
-            # Fallback to printing the truncated JSON string
-            print(truncated)
+                host, port = next_hop.split(':')
+                self.send_message(packet, host, int(port))
+                self.logger.info(f"Relayed packet to {next_hop}")
+            else:
+                self.logger.error(f"Cannot decrypt and no next_hop: {e}")
 
     def _process_task_json(self, task_json: dict):
         """
@@ -522,237 +420,80 @@ class AgentNode(UDPNode):
         else:
             self.logger.warning("No next_addr specified!")
 
-    def _forward_via_tor(self, task_json: dict, dest_addr: str):
-        """
-        Wrap task JSON in NEW Tor circuit and forward
-
-        Args:
-            task_json: Modified task JSON (SAME SIZE as received)
-            dest_addr: Destination address (next agent or orchestrator)
-        """
-        host, port = dest_addr.split(':')
-        port = int(port)
-
-        message = {
-            'type': 'TOR_PACKET',
-            'task_json': task_json
-        }
-
-        # Log the encrypted JSON being sent
-        print(f"\n{'='*80}")
-        print(f"[{self.node_id}] FORWARDING VIA TOR")
-        print(f"{'='*80}")
-        print(f"Destination: {dest_addr}")
-        print(f"Packet Type: {message['type']}")
-        print(f"Task JSON entries: {len(task_json)}")
-        print(f"\nEncrypted JSON Keys:")
-        for idx, (key_hash, encrypted_data) in enumerate(list(task_json.items())[:5], 1):
-            if isinstance(encrypted_data, dict) and 'nonce' in encrypted_data:
-                print(f"  {idx}. {key_hash}: nonce={encrypted_data['nonce'][:16]}..., "
-                      f"ciphertext_size={len(encrypted_data['ciphertext'])} bytes")
-            else:
-                print(f"  {idx}. {key_hash}: {str(encrypted_data)[:60]}...")
-        if len(task_json) > 5:
-            print(f"  ... and {len(task_json) - 5} more entries")
-
-        packet_size = len(json.dumps(message))
-        print(f"\nTotal packet size: {packet_size} bytes")
-        print(f"Sending from: {self.host}:{self.port}")
-        print(f"Sending to: {dest_addr}")
-        print(f"{'='*80}\n")
-
-        self.send_message(message, host, port)
-        self.logger.info(f"Forwarded task JSON (size: {len(task_json)} entries) to {dest_addr}")
-
     def _send_task_json_via_tor(self, task_json: dict, dest_addr: str, task_id: str):
         """
-        Build and send a 4-layer Tor packet for `task_json` using relay-selection policy:
-        - Guards are chosen from `get_guards(count=5)` (top reputations).
-        - Guard, middle, exit each selected randomly from their top-3 pools (or fewer if not available).
-        - Layer-1 is encrypted with THIS agent's key (self.node_id), so recipient knows which agent sent it.
+        Build and send a 4-layer Tor packet for task_json.
+        All 4 layers use same key derivation: DER-encoded public key from topology, truncated to 32 bytes.
 
         Args:
-            task_json: The task payload (dict) to send (will be serialized as plaintext layer1)
+            task_json: The task payload (dict) to send
             dest_addr: Destination address (IP:port format)
             task_id: Identifier for logging/debug
         """
         import random
-        try:
-            from src.tor.packet import TorPacket
-        except Exception:
-            self.logger.error("TorPacket module not available; cannot build Tor packet")
-            return
+        from src.tor.packet import TorPacket
 
-        # Gather relay lists - FILTER by reputation threshold (>= 0.6)
-        all_relays = self.relay_directory.get_all_relays()
+        # Filter relays by reputation threshold (>= 0.6)
         REPUTATION_THRESHOLD = 0.6
-        qualified_relays = [r for r in all_relays if r.get('relay_reputation', 0) >= REPUTATION_THRESHOLD]
+        all_relays = self.relay_directory.get_all_relays()
+        qualified = [r for r in all_relays if r.get('relay_reputation', 0) >= REPUTATION_THRESHOLD]
 
-        if len(qualified_relays) < 3:
-            self.logger.error(f"Not enough qualified relays (reputation >= {REPUTATION_THRESHOLD}) to build circuit. "
-                            f"Found {len(qualified_relays)}, need 3. Aborting send.")
+        if len(qualified) < 3:
+            self.logger.error(f"Not enough qualified relays ({len(qualified)}/3). Aborting.")
             return
 
-        # 1) Prepare guard candidates (prefer top guards from qualified relays only)
-        guard_candidates = [r for r in self.relay_directory.get_guards(count=5)
-                           if r.get('relay_reputation', 0) >= REPUTATION_THRESHOLD]
-        if not guard_candidates:
-            # Fallback: use qualified relays sorted by reputation desc
-            guard_candidates = sorted(qualified_relays, key=lambda r: r.get('relay_reputation', 0), reverse=True)
+        # Select 3 distinct relays by reputation
+        qualified.sort(key=lambda r: r.get('relay_reputation', 0), reverse=True)
+        guard = random.choice(qualified[:3])
+        remaining = [r for r in qualified if r['address'] != guard['address']]
+        middle = random.choice(remaining[:3])
+        remaining = [r for r in remaining if r['address'] != middle['address']]
+        exit_relay = random.choice(remaining[:3])
 
-        # Sort and take top-3 (or fewer)
-        guard_candidates.sort(key=lambda r: r.get('relay_reputation', 0), reverse=True)
-        guard_pool = guard_candidates[:3] if len(guard_candidates) >= 1 else guard_candidates
-
-        # Select guard randomly from guard_pool
-        guard_relay = random.choice(guard_pool)
-        guard_addr = guard_relay['address']
-
-        # Remove chosen guard from available relays for next picks
-        chosen_addrs = {guard_addr}
-
-        # 2) Middle relay selection from remaining QUALIFIED relays by reputation
-        remaining = [r for r in qualified_relays if r['address'] not in chosen_addrs]
-        if not remaining:
-            self.logger.error("No available qualified middle relays after selecting guard; aborting")
-            return
-
-        remaining.sort(key=lambda r: r.get('relay_reputation', 0), reverse=True)
-        middle_pool = remaining[:3] if len(remaining) >= 1 else remaining
-        middle_relay = random.choice(middle_pool)
-        middle_addr = middle_relay['address']
-        chosen_addrs.add(middle_addr)
-
-        # 3) Exit relay selection from remaining QUALIFIED relays by reputation
-        remaining2 = [r for r in qualified_relays if r['address'] not in chosen_addrs]
-        if not remaining2:
-            self.logger.error("No available qualified exit relays after selecting guard/middle; aborting")
-            return
-
-        remaining2.sort(key=lambda r: r.get('relay_reputation', 0), reverse=True)
-        exit_pool = remaining2[:3] if len(remaining2) >= 1 else remaining2
-        exit_relay = random.choice(exit_pool)
+        guard_addr = guard['address']
+        middle_addr = middle['address']
         exit_addr = exit_relay['address']
 
-        # Ensure distinct addresses (defensive)
-        if len({guard_addr, middle_addr, exit_addr}) < 3:
-            self.logger.error("Unable to select three distinct qualified relays; aborting")
-            return
-
-        # Lookup relay keys (preserve existing pattern; use getattr to avoid KeyError)
+        # Get keys from topology (all layers use same method)
         relay_keys = getattr(self, 'relay_keys', {})
         guard_key = relay_keys.get(guard_addr, os.urandom(32))
         middle_key = relay_keys.get(middle_addr, os.urandom(32))
         exit_key = relay_keys.get(exit_addr, os.urandom(32))
+        dest_key = relay_keys.get(dest_addr, os.urandom(32))  # Destination key from topology
 
-        # Log chosen relays and reputations (non-identifying, show address+rep)
-        self.logger.info(f"Selected circuit for task {task_id}: Guard={guard_addr} (rep={guard_relay.get('relay_reputation', 0):.2f}), "
-                         f"Middle={middle_addr} (rep={middle_relay.get('relay_reputation', 0):.2f}), "
-                         f"Exit={exit_addr} (rep={exit_relay.get('relay_reputation', 0):.2f})")
+        # Build payload
+        plaintext = json.dumps({'type': 'TOR_PACKET', 'task_json': task_json, 'task_id': task_id})
 
-        # Build Tor packet (wrap task_json with metadata)
-        plaintext_payload = json.dumps({
-            'type': 'TOR_PACKET',
-            'task_json': task_json,
-            'task_id': task_id
-        })
-
-        # Layer 1 encrypted with THIS agent's key (self.node_id)
-        # Recipient will decrypt with derive_key_from_agent_id(current_agent_id)
+        # Build 4-layer packet (dest_key for innermost layer, same method as all others)
         packet = TorPacket.build_4_layer_packet(
-            plaintext=plaintext_payload,
-            recipient_agent_id=self.node_id,  # Use current agent's key for Layer 1
+            plaintext=plaintext,
+            dest_key=dest_key,
             guard_key=guard_key,
             middle_key=middle_key,
             exit_key=exit_key,
             guard_addr=guard_addr,
             middle_addr=middle_addr,
             exit_addr=exit_addr,
-            dest_addr=dest_addr  # Final destination (orchestrator or next agent)
+            dest_addr=dest_addr
         )
 
-        # Log circuit details before sending
-        print(f"\n{'='*80}")
-        print(f"[{self.node_id}] SENDING RESPONSE VIA TOR CIRCUIT")
-        print(f"{'='*80}")
-        print(f"Task ID: {task_id}")
-        print(f"Destination: {dest_addr}")
-        print(f"\nCIRCUIT SELECTED:")
-        print(f"  Guard:  {guard_addr}")
-        print(f"  Middle: {middle_addr}")
-        print(f"  Exit:   {exit_addr}")
-        print(f"\nLAYER 1 ENCRYPTION:")
-        print(f"  Encrypted with agent key: {self.node_id}")
-        print(f"  Task JSON entries: {len(task_json)}")
-        print(f"{'='*80}\n")
+        print(f"\n[{self.node_id}] Sending via Tor: {guard_addr} → {middle_addr} → {exit_addr} → {dest_addr}")
 
-        # Send packet to first hop (guard)
-        try:
-            host, port = guard_addr.split(':')
-            port = int(port)
-            self.send_message(packet, host, port)
-            self.logger.info(f"Sent Tor packet for task {task_id} to guard {guard_addr}")
-        except Exception as e:
-            self.logger.error(f"Failed to send Tor packet to guard {guard_addr}: {e}")
+        # Send to guard
+        host, port = guard_addr.split(':')
+        self.send_message(packet, host, int(port))
+        self.logger.info(f"Sent task {task_id} via Tor circuit")
 
     def _relay_tor_packet(self, packet: dict):
-        """
-        Forward Tor packet as intermediate relay (cannot decrypt)
-
-        Args:
-            packet: Tor packet with next_hop address
-        """
-        # Accept either 'next_hop' or legacy/alternate 'dest' field
-        next_hop = packet.get('next_hop') or packet.get('dest')
-
+        """Forward Tor packet as intermediate relay (cannot decrypt)"""
+        next_hop = packet.get('next_hop')
         if not next_hop:
-            self.logger.error("No next_hop/dest in packet - cannot relay")
+            self.logger.error("No next_hop in packet - cannot relay")
             return
 
-        # Log traffic forwarding details
-        print(f"\n{'='*80}")
-        print(f"[{self.node_id}] RELAYING TOR TRAFFIC (Cannot Decrypt)")
-        print(f"{'='*80}")
-        print(f"Acting as: Intermediate Relay")
-        print(f"Current node: {self.host}:{self.port}")
-        print(f"Next hop: {next_hop}")
-
-        # Show encrypted layers
-        if 'layer4' in packet:
-            layer_data = packet['layer4']
-            print(f"\nEncrypted Layer 4 (outermost):")
-            print(f"  Nonce: {layer_data.get('nonce', 'N/A')[:16]}...")
-            print(f"  Ciphertext size: {len(layer_data.get('ciphertext', ''))} bytes")
-        elif 'layer3' in packet:
-            layer_data = packet['layer3']
-            print(f"\nEncrypted Layer 3:")
-            print(f"  Nonce: {layer_data.get('nonce', 'N/A')[:16]}...")
-            print(f"  Ciphertext size: {len(layer_data.get('ciphertext', ''))} bytes")
-        elif 'layer2' in packet:
-            layer_data = packet['layer2']
-            print(f"\nEncrypted Layer 2:")
-            print(f"  Nonce: {layer_data.get('nonce', 'N/A')[:16]}...")
-            print(f"  Ciphertext size: {len(layer_data.get('ciphertext', ''))} bytes")
-        elif 'layer1' in packet:
-            layer_data = packet['layer1']
-            print(f"\nEncrypted Layer 1 (innermost):")
-            print(f"  Nonce: {layer_data.get('nonce', 'N/A')[:16]}...")
-            print(f"  Ciphertext size: {len(layer_data.get('ciphertext', ''))} bytes")
-
-        packet_size = len(json.dumps(packet))
-        print(f"\nPacket size: {packet_size} bytes")
-        print(f"Traffic flow: [Previous Hop] → [{self.node_id}] → [{next_hop}]")
-        print(f"{'='*80}\n")
-
-        self.logger.info(f"Relaying packet to {next_hop}")
-
-        # Parse destination
+        print(f"[{self.node_id}] Relaying to {next_hop}")
         host, port = next_hop.split(':')
-        port = int(port)
-
-        # Forward packet unchanged
-        self.send_message(packet, host, port)
-        self.logger.info(f"Packet relayed to {next_hop}")
+        self.send_message(packet, host, int(port))
     
     
     

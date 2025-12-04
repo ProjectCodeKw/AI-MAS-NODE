@@ -14,125 +14,61 @@ from src.crypto.crypto_utils import CryptoUtils
 
 class TorPacket:
     """
-    4-Layer Tor packet structure:
-    Layer 4 (outermost): Guard relay encryption
-    Layer 3: Middle relay encryption
-    Layer 2: Exit relay encryption
-    Layer 1 (innermost): Agent-to-agent encryption (recipient agent_id key)
+    4-Layer Tor packet. All layers use same encryption method (AES-256-GCM with 32-byte key).
+    Keys derived from public_key in topology (DER-encoded, truncated to 32 bytes).
     """
-    
+
     @staticmethod
-    def build_4_layer_packet(plaintext: str, recipient_agent_id: str,
+    def build_4_layer_packet(plaintext: str, dest_key: bytes,
                             guard_key: bytes, middle_key: bytes, exit_key: bytes,
                             guard_addr: str, middle_addr: str, exit_addr: str,
                             dest_addr: str) -> dict:
         """
-        Build 4-layer encrypted Tor packet
-        
+        Build 4-layer encrypted Tor packet. All layers use same key derivation method.
+
         Args:
-            plaintext: Message to send
-            recipient_agent_id: Destination agent ID (for Layer 1 key derivation)
-            guard_key: Shared key with guard relay (Layer 4)
-            middle_key: Shared key with middle relay (Layer 3)
-            exit_key: Shared key with exit relay (Layer 2)
-            guard_addr: "ip:port" of guard
-            middle_addr: "ip:port" of middle
-            exit_addr: "ip:port" of exit
-            dest_addr: "ip:port" of final destination
-        
-        Returns:
-            dict: 4-layer encrypted packet ready to send to guard
+            plaintext: Message to send (JSON string)
+            dest_key: 32-byte key for destination (same method as relay keys)
+            guard_key: 32-byte key for guard relay
+            middle_key: 32-byte key for middle relay
+            exit_key: 32-byte key for exit relay
+            guard_addr, middle_addr, exit_addr, dest_addr: "ip:port" addresses
         """
-        
-        # Layer 1: Encrypt with recipient's agent_id-derived key
-        layer1_key = CryptoUtils.derive_key_from_agent_id(recipient_agent_id)
-        layer1_payload = {
-            'plaintext': plaintext,
-            'recipient': recipient_agent_id
-        }
-        layer1_encrypted = CryptoUtils.encrypt_aes_gcm(layer1_key, json.dumps(layer1_payload))
-        
-        # Layer 2: Encrypt Layer 1 + destination address with exit relay key
-        layer2_payload = {
-            'layer1': layer1_encrypted,
-            'next_hop': dest_addr
-        }
-        layer2_encrypted = CryptoUtils.encrypt_aes_gcm(exit_key, json.dumps(layer2_payload))
-        
-        # Layer 3: Encrypt Layer 2 + exit address with middle relay key
-        layer3_payload = {
-            'layer2': layer2_encrypted,
-            'next_hop': exit_addr
-        }
-        layer3_encrypted = CryptoUtils.encrypt_aes_gcm(middle_key, json.dumps(layer3_payload))
-        
-        # Layer 4: Encrypt Layer 3 + middle address with guard relay key
-        layer4_payload = {
-            'layer3': layer3_encrypted,
-            'next_hop': middle_addr
-        }
-        layer4_encrypted = CryptoUtils.encrypt_aes_gcm(guard_key, json.dumps(layer4_payload))
-        
-        # Final packet to send to guard
-        packet = {
-            'type': 'TOR_PACKET',
-            'layer4': layer4_encrypted,
-            'dest': guard_addr  # First hop
-        }
-        
-        return packet
-    
+        # Build from inside out - all layers use same structure
+        # Inner layer (destination)
+        inner = CryptoUtils.encrypt_aes_gcm(dest_key, plaintext)
+
+        # Exit layer wraps inner + dest address
+        exit_payload = json.dumps({'encrypted': inner, 'next_hop': dest_addr})
+        exit_layer = CryptoUtils.encrypt_aes_gcm(exit_key, exit_payload)
+
+        # Middle layer wraps exit + exit address
+        middle_payload = json.dumps({'encrypted': exit_layer, 'next_hop': exit_addr})
+        middle_layer = CryptoUtils.encrypt_aes_gcm(middle_key, middle_payload)
+
+        # Guard layer wraps middle + middle address
+        guard_payload = json.dumps({'encrypted': middle_layer, 'next_hop': middle_addr})
+        guard_layer = CryptoUtils.encrypt_aes_gcm(guard_key, guard_payload)
+
+        return {'type': 'TOR_PACKET', 'encrypted': guard_layer, 'next_hop': guard_addr}
+
     @staticmethod
-    def peel_layer(encrypted_layer: dict, relay_key: bytes) -> dict:
+    def try_decrypt(encrypted_data: dict, key: bytes) -> tuple:
         """
-        Peel one layer of Tor encryption
-        
+        Try to decrypt an encrypted layer.
+
         Args:
-            encrypted_layer: dict with 'nonce' and 'ciphertext'
-            relay_key: This relay's shared key
-        
+            encrypted_data: dict with 'nonce' and 'ciphertext'
+            key: 32-byte AES key
+
         Returns:
-            dict with 'next_hop' and next encrypted layer (or plaintext if final)
-        
-        Raises:
-            ValueError: If decryption fails
-        """
-        decrypted_json = CryptoUtils.decrypt_aes_gcm(
-            relay_key,
-            encrypted_layer['nonce'],
-            encrypted_layer['ciphertext']
-        )
-        return json.loads(decrypted_json)
-    
-    @staticmethod
-    def try_decrypt_layer1(encrypted_layer: dict, agent_id: str) -> Optional[dict]:
-        """
-        Attempt to decrypt Layer 1 (final destination check)
-        
-        Args:
-            encrypted_layer: dict with 'nonce' and 'ciphertext'
-            agent_id: This agent's ID
-        
-        Returns:
-            dict with plaintext if successful, None if not final destination
+            (success: bool, payload: str or None)
         """
         try:
-            key = CryptoUtils.derive_key_from_agent_id(agent_id)
-            decrypted_json = CryptoUtils.decrypt_aes_gcm(
-                key,
-                encrypted_layer['nonce'],
-                encrypted_layer['ciphertext']
-            )
-            payload = json.loads(decrypted_json)
-            
-            # Check if this is actually for us
-            if payload.get('recipient') == agent_id:
-                return payload
-            else:
-                return None
+            decrypted = CryptoUtils.decrypt_aes_gcm(key, encrypted_data['nonce'], encrypted_data['ciphertext'])
+            return True, decrypted
         except:
-            # Decryption failed - not final destination
-            return None
+            return False, None
 
 
 # Self-test
