@@ -1,18 +1,43 @@
 {
   "network_name": "AI-MAS-Network",
-  "total_nodes": 6,
+  "total_nodes": 5,
   "public_key_algorithm": "RSA",
   "nodes": [
+      {
+      "network_address": "192.168.1.64:8001",
+      "port": 8001,
+      "start_time": 1704067200,
+      "relay_reputation": 0.1,
+      "public_key": "MCowBQYDK2VwAyEAhaqkEG81LBSy6C5FcYagoGjdXP6qaEe3ag6ItJrj5AM="
+    },
+      {
+      "network_address": "192.168.1.62:8001",
+      "port": 8001,
+      "start_time": 1704067200,
+      "relay_reputation": 0.4,
+      "public_key": "MCowBQYDK2VwAyEAomsk8aZs03AFmf4RSE2WARgLXKOUZ7lixHobEiDfUGg="
+    },
     {
-  "network_address": "192.168.1.62:8001",
-  "port": 8001,
-  "public_key": "MCowBQYDK2VwAyEAScPp0M5n9tBx0qK1FVlUDIHEUIBldKtlEDDa4LFPDeE="
-  },
-  {
+      "network_address": "192.168.1.85:8001",
+      "port": 8001,
+      "start_time": 1704153600,
+      "relay_reputation": 0.9,
+      "public_key": "MCowBQYDK2VwAyEA7QOvsDgWZTU/+IHjfUyRmqxvJQXxDg3Hl7000GQUThU="
+    },
+    {
+      "network_address": "192.168.1.76:8001",
+      "port": 8001,
+      "start_time": 1704240000,
+      "relay_reputation": 0.7,
+      "public_key": "MCowBQYDK2VwAyEAqMaMwDME5dOmm3vlJhrNjdwur2C1AKJppkq5LIdb7pE="
+    },
+    {
       "network_address": "192.168.1.65:8001",
       "port": 8001,
+      "start_time": 1704067200,
+      "relay_reputation": 0.95,
       "public_key": "MCowBQYDK2VwAyEA27y2TUOVascRv1sQmKffCILP5F/a4+zClnjxtfxgH9k="
-}
+    }
   ],
   "gossip_config": {
     "fanout": 2,

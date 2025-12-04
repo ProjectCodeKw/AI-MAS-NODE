@@ -88,7 +88,7 @@ class ModelBenchmark:
         load_time = load_end - load_start
         
         self.benchmark_results["load_time"] = load_time
-        print(f"✓ Model loaded in {load_time:.3f} seconds")
+        print(f"Model loaded in {load_time:.3f} seconds")
         
         # Check model info
         print(f"Context size: {self.llm.n_ctx()} tokens")

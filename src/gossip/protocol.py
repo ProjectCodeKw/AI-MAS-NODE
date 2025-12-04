@@ -63,62 +63,56 @@ class GossipProtocol:
         """Stop gossip protocol"""
         self.running = False
     
-    def create_relay_update(self, address: str, current_load: float, 
-                           uptime_score: float, priority: str = PRIORITY_NORMAL) -> Dict:
+    def create_relay_update(self, address: str, current_load: float,
+                           priority: str = PRIORITY_NORMAL) -> Dict:
         """
-        Create relay update message
-        
+        Create relay update message (only gossips load, not uptime)
+
         Args:
             address: This node's "ip:port"
             current_load: 0.0 to 1.0
-            uptime_score: 0.0 to 1.0
             priority: Message priority
-        
+
         Returns:
             Signed gossip message dict
         """
-        relay_reputation = (uptime_score * 0.5) + ((1.0 - current_load) * 0.5)
-        
         message = {
             'type': 'RELAY_UPDATE',
             'priority': priority,
-            'node_id': self.node_id,
             'network_address': address,
             'current_load': current_load,
-            'uptime_score': uptime_score,
-            'relay_reputation': relay_reputation,
             'public_key': self.public_key_b64,
             'timestamp': int(time.time() * 1000),  # milliseconds
             'message_id': str(uuid.uuid4()),
             'ttl': self.TTL_DEFAULT,
             'seen_by': []
         }
-        
-        # Sign message (exclude signature field)
-        message_str = json.dumps(message, sort_keys=True)
+
+        # Sign only immutable fields (exclude ttl, seen_by, signature)
+        signable_fields = {k: v for k, v in message.items() if k not in ['ttl', 'seen_by']}
+        message_str = json.dumps(signable_fields, sort_keys=True)
         message['signature'] = CryptoUtils.sign_message(self.private_key, message_str)
-        
+
         return message
     
-    def gossip_relay_update(self, address: str, current_load: float, uptime_score: float):
+    def gossip_relay_update(self, address: str, current_load: float):
         """
-        Gossip relay update to k random peers
-        
+        Gossip relay update to k random peers (only load, uptime is calculated locally)
+
         Args:
             address: This node's "ip:port"
             current_load: Current load (0.0 to 1.0)
-            uptime_score: Uptime score (0.0 to 1.0)
         """
-        message = self.create_relay_update(address, current_load, uptime_score)
-        
+        message = self.create_relay_update(address, current_load)
+
         # Add to seen set
         with self.seen_lock:
             self.seen_messages.add(message['message_id'])
-        
+
         # Forward to k random peers
-        self._forward_to_peers(message, exclude=[])
-        
-        print(f"[{self.node_id}] Gossiped relay update (load={current_load:.2f}, uptime={uptime_score:.2f})")
+        self._forward_to_peers(message)
+
+        print(f"[{self.node_id}] Gossiped relay update (load={current_load:.2f})")
     
     def handle_gossip_message(self, message: Dict, sender_addr: tuple) -> bool:
         """
@@ -160,45 +154,49 @@ class GossipProtocol:
         return True
     
     def _handle_relay_update(self, message: Dict):
-        """Process relay update message"""
-        self.relay_directory.add_relay(
-            relay_id=message['node_id'],
+        """Process relay update message (only load, uptime calculated locally)"""
+        self.relay_directory.update_relay_from_gossip(
             address=message['network_address'],
             public_key=message['public_key'],
-            current_load=message['current_load'],
-            uptime_score=message['uptime_score']
+            current_load=message['current_load']
         )
-        print(f"[{self.node_id}] Updated RD: {message['node_id']} @ {message['network_address']}")
+        print(f"[{self.node_id}] Updated RD: {message['network_address']} (load={message['current_load']:.2f})")
     
-    def _forward_to_peers(self, message: Dict, exclude: list):
+    def _forward_to_peers(self, message: Dict, exclude: list = None):
         """
         Forward message to k random peers
-        
+
         Args:
             message: Message to forward
-            exclude: List of node_ids to exclude
+            exclude: List of node_ids to exclude (not used currently - needs address mapping)
         """
-        peers = self.relay_directory.get_random_peers(self.FANOUT, exclude=exclude)
-        
+        # Note: exclude parameter contains node_ids but get_random_peers expects addresses
+        # For now, get random peers without exclusion
+        peers = self.relay_directory.get_random_peers(self.FANOUT, exclude_addresses=[])
+
         for peer in peers:
             try:
                 # Parse address
                 host, port = peer['address'].split(':')
                 port = int(port)
-                
+
                 # Send via UDP
                 self.send_callback(message, host, port)
             except Exception as e:
-                print(f"[{self.node_id}] Failed to forward to {peer['relay_id']}: {e}")
+                print(f"[{self.node_id}] Failed to forward to {peer['address']}: {e}")
     
     def _verify_message_signature(self, message: Dict) -> bool:
-        """Verify message signature"""
+        """Verify message signature (excluding mutable routing fields)"""
         try:
-            signature = message.pop('signature')
-            message_str = json.dumps(message, sort_keys=True)
+            signature = message.get('signature')
+            if not signature:
+                return False
+
+            # Verify only immutable fields (exclude ttl, seen_by, signature)
+            signable_fields = {k: v for k, v in message.items() if k not in ['ttl', 'seen_by', 'signature']}
+            message_str = json.dumps(signable_fields, sort_keys=True)
             public_key = CryptoUtils.deserialize_public_key(message['public_key'])
             is_valid = CryptoUtils.verify_signature(public_key, message_str, signature)
-            message['signature'] = signature  # Restore
             return is_valid
         except Exception as e:
             print(f"Signature verification error: {e}")

@@ -5,7 +5,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from src.nodes.agent_node import AgentNode
+from agent_node import AgentNode
 from src.crypto.crypto_utils import CryptoUtils
 import time
 
@@ -17,7 +17,7 @@ if __name__ == "__main__":
     
     agent = AgentNode(
         node_id="agent-code",
-        host="0.0.0.0",
+        host=MY_IP,
         port=MY_PORT,
         specialty="code-generation",
         inference_time_ms=800
